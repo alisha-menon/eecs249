@@ -1,0 +1,5 @@
+r
+loadfile _build/virtual_timers_sdk15_blank.hex 
+r
+g
+exit
