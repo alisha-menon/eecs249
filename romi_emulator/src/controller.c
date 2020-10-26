@@ -128,7 +128,7 @@ robot_state_t controller(robot_state_t state) {
           last_encoder = sensors.leftWheelEncoder;
           distance_traveled = 0.0;
           state = TURN_UPHILL;
-          kobukiDriveDirect(5, -5);
+          kobukiDriveDirect(20, -20);
           min_theta = read_theta_x();
           display_float(min_theta);
           display_float(tilt_accel);
@@ -181,12 +181,12 @@ robot_state_t controller(robot_state_t state) {
           //display_float(tilt_accel);
           if ((((previous_theta > 0) && (current_theta <= 0)) || ((previous_theta < 0) && (current_theta >=0))) && (current_psi <= 0)) {
             state = DRIVING_UP;
-            kobukiDriveDirect(75,75);
+            kobukiDriveDirect(100,100);
           }
           else {
             previous_theta = current_theta;
             //display_float(min_theta);
-            kobukiDriveDirect(5,-5);
+            kobukiDriveDirect(50,-50);
             state = TURN_UPHILL;
           }
         }
@@ -233,14 +233,14 @@ robot_state_t controller(robot_state_t state) {
           //distance_traveled += value;
           //last_encoder = curr_encoder;
           //display_float(distance_traveled);
-          if (tilt_accel <= 1) {
+          if (tilt_accel <= 3) {
             //lsm9ds1_start_gyro_integration();
             distance_traveled = 0;
             last_encoder = sensors.leftWheelEncoder;
             state = DRIVE_FURTHER;
-            kobukiDriveDirect(75, 75);
+            kobukiDriveDirect(100, 100);
           } else {
-            kobukiDriveDirect(75, 75);
+            kobukiDriveDirect(100, 100);
             state = DRIVING_UP;
           }
         }
@@ -291,7 +291,7 @@ robot_state_t controller(robot_state_t state) {
             //distance_traveled = 0;
             //last_encoder = sensors.leftWheelEncoder;
             state = DRIVE_FURTHER;
-            kobukiDriveDirect(75, 75);
+            kobukiDriveDirect(100, 100);
           } else {
             lsm9ds1_start_gyro_integration();
             state = TURN_CW;
@@ -336,7 +336,7 @@ robot_state_t controller(robot_state_t state) {
           float angle_turned = fabs(lsm9ds1_read_gyro_integration().z_axis);
           display_write(" ", DISPLAY_LINE_0);
           display_float(angle_turned);
-          if (angle_turned >= 180) {
+          if (angle_turned >= 160) {
             lsm9ds1_stop_gyro_integration();
             // allow encoder momentum to stop
             display_write("PAUSING", DISPLAY_LINE_0);
@@ -349,7 +349,7 @@ robot_state_t controller(robot_state_t state) {
             last_encoder = sensors.leftWheelEncoder;
             curr_tilt = tilt_accel;
             state = DRIVING_DOWN;
-            kobukiDriveDirect(75,75);
+            kobukiDriveDirect(100,100);
           } else {
             display_write("TURNING", DISPLAY_LINE_0);
             kobukiDriveDirect(40, -40);
@@ -413,7 +413,7 @@ robot_state_t controller(robot_state_t state) {
             //lsm9ds1_start_gyro_integration();
             state = OFF;
           } else {
-            kobukiDriveDirect(75, 75);
+            kobukiDriveDirect(100, 100);
             state = DRIVING_DOWN;
           }
         }
