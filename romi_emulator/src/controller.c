@@ -51,18 +51,62 @@ static bool check_and_save_bump(KobukiSensors_t* sensors, bool* obstacle_is_righ
   // Your code here
 }
 
+bool cliff_left, cliff_center, cliff_right;
+
 // Return true if a cliff has been seen
 // Save information about which cliff
-static bool check_cliff(KobukiSensors_t* sensors, bool* cliff_is_right) {
-  // Your code here
+static bool check_cliff(KobukiSensors_t* sensors) {
+  cliff_left = sensors->cliffLeft;
+  cliff_center = sensors->cliffCenter;
+  cliff_right = sensors->cliffRight;
+  if (cliff_left || cliff_center || cliff_right) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 // Read accelerometer value and calculate and return tilt (along axis corresponding to climbing the hill)
 static float read_tilt() {
-  // Your code here
+  lsm9ds1_measurement_t accelerometer_values = lsm9ds1_read_accelerometer();
+  float  x_g = accelerometer_values.x_axis;
+  float  y_g = accelerometer_values.y_axis;
+  float  z_g = accelerometer_values.z_axis;
+  float  theta = atan(x_g/(sqrt(pow(y_g,2) + pow(z_g,2))))*180/3.14;
+  float  psi = atan(y_g/(sqrt(pow(x_g,2) + pow(z_g,2))))*180/3.14;
+  float  phi = atan((sqrt(pow(x_g,2) + pow(y_g,2))/z_g))*180/3.14;
+  return phi;
+}
+
+static float read_psi_y() {
+  lsm9ds1_measurement_t accelerometer_values = lsm9ds1_read_accelerometer();
+  float  x_g = accelerometer_values.x_axis;
+  float  y_g = accelerometer_values.y_axis;
+  float  z_g = accelerometer_values.z_axis;
+  //float  theta = atan(x_g/(sqrt(pow(y_g,2) + pow(z_g,2))))*180/3.14;
+  float  psi = atan(y_g/(sqrt(pow(x_g,2) + pow(z_g,2))))*180/3.14;
+  //float  phi = atan((sqrt(pow(x_g,2) + pow(y_g,2))/z_g))*180/3.14;
+  return psi;
+}
+
+static float read_theta_x() {
+  lsm9ds1_measurement_t accelerometer_values = lsm9ds1_read_accelerometer();
+  float  x_g = accelerometer_values.x_axis;
+  float  y_g = accelerometer_values.y_axis;
+  float  z_g = accelerometer_values.z_axis;
+  float  theta = atan(x_g/(sqrt(pow(y_g,2) + pow(z_g,2))))*180/3.14;
+  //float  psi = atan(y_g/(sqrt(pow(x_g,2) + pow(z_g,2))))*180/3.14;
+  //float  phi = atan((sqrt(pow(x_g,2) + pow(y_g,2))/z_g))*180/3.14;
+  return theta;
 }
 
 int i;
+float min_theta;
+float current_theta, previous_theta;
+float current_psi;
+float curr_tilt, prev_tilt;
+bool up0_down1;
 
 // Robot controller
 // State machine running on robot_state_t state
@@ -72,7 +116,9 @@ robot_state_t controller(robot_state_t state) {
   kobukiSensorPoll(&sensors);
   nrf_delay_ms(1);
   float tilt = read_tilt();
-
+  bool is_cliff = check_cliff(&sensors);
+  float tilt_accel = read_tilt();
+  //display_float(tilt_accel);
     // handle states
     switch(state) {
       display_float((int)state);
@@ -81,7 +127,11 @@ robot_state_t controller(robot_state_t state) {
         if (is_button_pressed(&sensors)) {
           last_encoder = sensors.leftWheelEncoder;
           distance_traveled = 0.0;
-          state = DRIVING;
+          state = TURN_UPHILL;
+          kobukiDriveDirect(5, -5);
+          min_theta = read_theta_x();
+          display_float(min_theta);
+          display_float(tilt_accel);
         } else {
           // perform state-specific actions here
           display_write("OFF", DISPLAY_LINE_0);
@@ -92,12 +142,64 @@ robot_state_t controller(robot_state_t state) {
         break; // each case needs to end with break!
       }
 
-      case DRIVING: {
+      case TURN_UPHILL: {
         // transition logic
         if (is_button_pressed(&sensors)) {
+          state = OFF; 
+        } else if (cliff_right || cliff_center) {
+          lsm9ds1_stop_gyro_integration();
+          // allow encoder momentum to stop
+          display_write("PAUSING", DISPLAY_LINE_0);
+          kobukiDriveDirect(0, 0);
+          for (i = 0; i < 30; i++) {
+            kobukiSensorPoll(&sensors);
+            nrf_delay_ms(1);
+          }
+          distance_traveled = 0;
+          last_encoder = sensors.leftWheelEncoder;
+          state = BACK_UP_LEFT;
+        } else if (cliff_left) {
+          lsm9ds1_stop_gyro_integration();
+          // allow encoder momentum to stop
+          display_write("PAUSING", DISPLAY_LINE_0);
+          kobukiDriveDirect(0, 0);
+          for (i = 0; i < 30; i++) {
+            kobukiSensorPoll(&sensors);
+            nrf_delay_ms(1);
+          }
+          distance_traveled = 0;
+          last_encoder = sensors.leftWheelEncoder;
+          state = BACK_UP_RIGHT;
+        } else {
+          display_write("TURN_UPHILL", DISPLAY_LINE_0);
+          current_theta = read_theta_x();
+          current_psi = read_psi_y();
+          //display_float(current_theta);
+          display_write(" ",DISPLAY_LINE_0);
+          //display_float(current_psi);
+          //display_float(min_theta);
+          //display_float(tilt_accel);
+          if ((((previous_theta > 0) && (current_theta <= 0)) || ((previous_theta < 0) && (current_theta >=0))) && (current_psi <= 0)) {
+            state = DRIVING_UP;
+            kobukiDriveDirect(75,75);
+          }
+          else {
+            previous_theta = current_theta;
+            //display_float(min_theta);
+            kobukiDriveDirect(5,-5);
+            state = TURN_UPHILL;
+          }
+        }
+        break; // each case needs to end with break!
+      }
+
+      case DRIVING_UP: {
+        // transition logic
+        display_float(tilt_accel);
+        display_write(" ", DISPLAY_LINE_0);
+        if (is_button_pressed(&sensors)) {
           state = OFF;
-        } else if (sensors.bumps_wheelDrops.bumpRight
-            || sensors.bumps_wheelDrops.bumpCenter) {
+        } else if (cliff_right || cliff_center) {
             display_write("PAUSING", DISPLAY_LINE_0);
             kobukiDriveDirect(0, 0);
             for (i = 0; i < 30; i++) {
@@ -109,8 +211,9 @@ robot_state_t controller(robot_state_t state) {
             last_encoder = sensors.leftWheelEncoder;
             //display_float(last_encoder);
             //kobukiDriveDirect(-100, -100);
+            up0_down1 = 0;
           state = BACK_UP_LEFT;
-        } else if (sensors.bumps_wheelDrops.bumpLeft) {
+        } else if (cliff_left) {
             display_write("PAUSING", DISPLAY_LINE_0);
             kobukiDriveDirect(0, 0);
             for (i = 0; i < 30; i++) {
@@ -120,21 +223,78 @@ robot_state_t controller(robot_state_t state) {
             distance_traveled = 0;
             display_float(distance_traveled);
             last_encoder = sensors.leftWheelEncoder;
-          state = BACK_UP_RIGHT;
+            up0_down1 = 0;
+            state = BACK_UP_RIGHT;
         } else {
           // perform state-specific actions here
-          display_write("DRIVING", DISPLAY_LINE_0);
+          display_write("DRIVING_UP", DISPLAY_LINE_0);
+          //uint16_t curr_encoder = sensors.leftWheelEncoder;
+          //float value = measure_distance(curr_encoder, last_encoder);
+          //distance_traveled += value;
+          //last_encoder = curr_encoder;
+          //display_float(distance_traveled);
+          if (tilt_accel <= 1) {
+            //lsm9ds1_start_gyro_integration();
+            distance_traveled = 0;
+            last_encoder = sensors.leftWheelEncoder;
+            state = DRIVE_FURTHER;
+            kobukiDriveDirect(75, 75);
+          } else {
+            kobukiDriveDirect(75, 75);
+            state = DRIVING_UP;
+          }
+        }
+        break; // each case needs to end with break!
+      }
+
+      case DRIVE_FURTHER: {
+        // transition logic
+        display_float(tilt_accel);
+        display_write(" ", DISPLAY_LINE_0);
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if (cliff_right || cliff_center) {
+            display_write("PAUSING", DISPLAY_LINE_0);
+            kobukiDriveDirect(0, 0);
+            for (i = 0; i < 30; i++) {
+              kobukiSensorPoll(&sensors);
+              nrf_delay_ms(1);
+            }
+            distance_traveled = 0;
+            display_float(distance_traveled);
+            last_encoder = sensors.leftWheelEncoder;
+            //display_float(last_encoder);
+            //kobukiDriveDirect(-100, -100);
+            up0_down1 = 0;
+            state = BACK_UP_LEFT;
+        } else if (cliff_left) {
+            display_write("PAUSING", DISPLAY_LINE_0);
+            kobukiDriveDirect(0, 0);
+            for (i = 0; i < 30; i++) {
+              kobukiSensorPoll(&sensors);
+              nrf_delay_ms(1);
+            }
+            distance_traveled = 0;
+            display_float(distance_traveled);
+            last_encoder = sensors.leftWheelEncoder;
+            up0_down1 = 0;
+            state = BACK_UP_RIGHT;
+        } else {
+          // perform state-specific actions here
+          display_write("DRIVING_UP", DISPLAY_LINE_0);
           uint16_t curr_encoder = sensors.leftWheelEncoder;
           float value = measure_distance(curr_encoder, last_encoder);
           distance_traveled += value;
           last_encoder = curr_encoder;
           display_float(distance_traveled);
-          if (distance_traveled >= 2) {
+          if (distance_traveled < 0.1) {
+            //distance_traveled = 0;
+            //last_encoder = sensors.leftWheelEncoder;
+            state = DRIVE_FURTHER;
+            kobukiDriveDirect(75, 75);
+          } else {
             lsm9ds1_start_gyro_integration();
             state = TURN_CW;
-          } else {
-            kobukiDriveDirect(75, 75);
-            state = DRIVING;
           }
         }
         break; // each case needs to end with break!
@@ -145,35 +305,38 @@ robot_state_t controller(robot_state_t state) {
         if (is_button_pressed(&sensors)) {
           lsm9ds1_stop_gyro_integration();
           state = OFF;
-        } else if (sensors.bumps_wheelDrops.bumpRight
-            || sensors.bumps_wheelDrops.bumpCenter) {
-          lsm9ds1_stop_gyro_integration();
-          // allow encoder momentum to stop
-          display_write("PAUSING", DISPLAY_LINE_0);
-          kobukiDriveDirect(0, 0);
-          for (i = 0; i < 30; i++) {
-            kobukiSensorPoll(&sensors);
-            nrf_delay_ms(1);
-          }
-          distance_traveled = 0;
-          last_encoder = sensors.leftWheelEncoder;
-          state = BACK_UP_LEFT;
-        } else if (sensors.bumps_wheelDrops.bumpLeft) {
-          lsm9ds1_stop_gyro_integration();
-          // allow encoder momentum to stop
-          display_write("PAUSING", DISPLAY_LINE_0);
-          kobukiDriveDirect(0, 0);
-          for (i = 0; i < 30; i++) {
-            kobukiSensorPoll(&sensors);
-            nrf_delay_ms(1);
-          }
-          distance_traveled = 0;
-          last_encoder = sensors.leftWheelEncoder;
-          state = BACK_UP_RIGHT;
+        // } else if (cliff_right || cliff_center) {
+        //   lsm9ds1_stop_gyro_integration();
+        //   // allow encoder momentum to stop
+        //   display_write("PAUSING, cliff R or C ", DISPLAY_LINE_0);
+        //   kobukiDriveDirect(0, 0);
+        //   for (i = 0; i < 30; i++) {
+        //     kobukiSensorPoll(&sensors);
+        //     nrf_delay_ms(1);
+        //   }
+        //   distance_traveled = 0;
+        //   last_encoder = sensors.leftWheelEncoder;
+        //   up0_down1 = 1;
+        //   state = BACK_UP_LEFT;
+        // } else if (cliff_left) {
+        //   lsm9ds1_stop_gyro_integration();
+        //   // allow encoder momentum to stop
+        //   display_write("PAUSING, cliff L", DISPLAY_LINE_0);
+        //   kobukiDriveDirect(0, 0);
+        //   for (i = 0; i < 30; i++) {
+        //     kobukiSensorPoll(&sensors);
+        //     nrf_delay_ms(1);
+        //   }
+        //   distance_traveled = 0;
+        //   last_encoder = sensors.leftWheelEncoder;
+        //   up0_down1 = 1;
+        //   state = BACK_UP_RIGHT;
         } else {
           // returns angles in degrees, cw is negative
           float angle_turned = fabs(lsm9ds1_read_gyro_integration().z_axis);
-          if (angle_turned >= 90) {
+          display_write(" ", DISPLAY_LINE_0);
+          display_float(angle_turned);
+          if (angle_turned >= 180) {
             lsm9ds1_stop_gyro_integration();
             // allow encoder momentum to stop
             display_write("PAUSING", DISPLAY_LINE_0);
@@ -184,7 +347,9 @@ robot_state_t controller(robot_state_t state) {
             }
             distance_traveled = 0;
             last_encoder = sensors.leftWheelEncoder;
-            state = DRIVING;
+            curr_tilt = tilt_accel;
+            state = DRIVING_DOWN;
+            kobukiDriveDirect(75,75);
           } else {
             display_write("TURNING", DISPLAY_LINE_0);
             kobukiDriveDirect(40, -40);
@@ -195,61 +360,122 @@ robot_state_t controller(robot_state_t state) {
         break;
       }
 
+      case DRIVING_DOWN: {
+        // transition logic
+        display_float(tilt_accel);
+        display_write(" ", DISPLAY_LINE_0);
+        if (is_button_pressed(&sensors)) {
+          state = OFF;
+        } else if ((cliff_right || cliff_center) && (distance_traveled > 0.15)) {
+            display_write("PAUSING, cliff_left", DISPLAY_LINE_0);
+            kobukiDriveDirect(0, 0);
+            for (i = 0; i < 30; i++) {
+              kobukiSensorPoll(&sensors);
+              nrf_delay_ms(1);
+            }
+            distance_traveled = 0;
+            display_float(distance_traveled);
+            last_encoder = sensors.leftWheelEncoder;
+            //display_float(last_encoder);
+            //kobukiDriveDirect(-100, -100);
+            up0_down1 = 1;
+            state = BACK_UP_LEFT;
+        } else if (cliff_left && (distance_traveled > 0.15)) {
+            if (cliff_right) {
+              display_write("PAUSING, CLIFF RIGHT", DISPLAY_LINE_0);
+            }
+            else {
+              display_write("PAUSING, CLIFF CENTER", DISPLAY_LINE_0);
+            }
+            kobukiDriveDirect(0, 0);
+            for (i = 0; i < 30; i++) {
+              kobukiSensorPoll(&sensors);
+              nrf_delay_ms(1);
+            }
+            distance_traveled = 0;
+            display_float(distance_traveled);
+            last_encoder = sensors.leftWheelEncoder;
+            curr_tilt = tilt_accel;
+            up0_down1 = 1;
+            state = BACK_UP_RIGHT;
+        } else {
+          // perform state-specific actions here
+          display_write("DRIVING_DOWN ", DISPLAY_LINE_0);
+          uint16_t curr_encoder = sensors.leftWheelEncoder;
+          float value = measure_distance(curr_encoder, last_encoder);
+          distance_traveled += value;
+          last_encoder = curr_encoder;
+          display_float(distance_traveled);
+          display_write(" ", DISPLAY_LINE_0);
+          prev_tilt = curr_tilt;
+          curr_tilt = tilt_accel;
+          if ((prev_tilt > 1) && (curr_tilt <= 1) && (distance_traveled > 0.3)) {
+            //lsm9ds1_start_gyro_integration();
+            state = OFF;
+          } else {
+            kobukiDriveDirect(75, 75);
+            state = DRIVING_DOWN;
+          }
+        }
+        break; // each case needs to end with break!
+      }
+
       case BACK_UP_LEFT: {
         display_write("BACK UP LEFT", DISPLAY_LINE_0);
         if (is_button_pressed(&sensors)) {
-    		  state = OFF;
-  	    } 
+          state = OFF;
+        } 
         else {
-    		  uint16_t curr_encoder = sensors.leftWheelEncoder;
+          uint16_t curr_encoder = sensors.leftWheelEncoder;
           display_float(curr_encoder);
-    		  float value = measure_distance(curr_encoder, last_encoder);
-    		  display_float(value);
+          float value = measure_distance(curr_encoder, last_encoder);
+          display_float(value);
           distance_traveled -= value;
-    		  last_encoder = curr_encoder;
-    		  display_float(distance_traveled);
+          last_encoder = curr_encoder;
+          display_float(distance_traveled);
     
-    		  if (distance_traveled <= -0.5) {
-     	 	    //display_write("distance less than -1", DISPLAY_LINE_0);
-      		  lsm9ds1_start_gyro_integration();
-      		  state = TURN_AWAY_LEFT;
-      		  //if (state == TURN_AWAY_LEFT) {
-			         //display_write("going to TURN_AWAY_LEFT", DISPLAY_LINE_0);
-      		  //}
+          if (distance_traveled <= -0.1) {
+            //display_write("distance less than -1", DISPLAY_LINE_0);
+            lsm9ds1_start_gyro_integration();
+            state = TURN_AWAY_LEFT;
+            //if (state == TURN_AWAY_LEFT) {
+               //display_write("going to TURN_AWAY_LEFT", DISPLAY_LINE_0);
+            //}
           } 
           else {
             //display_write("still backing up",DISPLAY_LINE_0);
-      			 kobukiDriveDirect(-50, -50);
-      			 state = BACK_UP_LEFT;
-    		  }
-  	    }
+             kobukiDriveDirect(-50, -50);
+             state = BACK_UP_LEFT;
+          }
+        }
         break;
       }
 
       case BACK_UP_RIGHT: {
         display_write("BACK UP RIGHT", DISPLAY_LINE_0);
         if (is_button_pressed(&sensors)) {
-    		  state = OFF;
-  	    } 
+          state = OFF;
+        } 
         else {
-    		  uint16_t curr_encoder = sensors.leftWheelEncoder;
-    		  float value = measure_distance(curr_encoder, last_encoder);
-    		  distance_traveled -= value;
-    		  last_encoder = curr_encoder;
-    		  display_float(distance_traveled);
+          uint16_t curr_encoder = sensors.leftWheelEncoder;
+          float value = measure_distance(curr_encoder, last_encoder);
+          distance_traveled -= value;
+          last_encoder = curr_encoder;
+          display_float(distance_traveled);
     
-    		  if (distance_traveled <= -0.5) {
-     	 	    //display_write("distance less than -80", DISPLAY_LINE_0);
-      		  lsm9ds1_start_gyro_integration();
-      		  state = TURN_AWAY_RIGHT;
-      		  //if (state == TURN_AWAY_RIGHT) {
-			      //   display_write("TURN_AWAY_LEFT", DISPLAY_LINE_0);
-      		  //} 
+          if (distance_traveled <= -0.1) {
+            //display_write("distance less than -80", DISPLAY_LINE_0);
+            lsm9ds1_start_gyro_integration();
+            state = TURN_AWAY_RIGHT;
+            //curr_tilt = tilt_accel;
+            //if (state == TURN_AWAY_RIGHT) {
+            //   display_write("TURN_AWAY_LEFT", DISPLAY_LINE_0);
+            //} 
           }
           else {
-      			kobukiDriveDirect(-50, -50);
-      			state = BACK_UP_RIGHT;
-    		  }
+            kobukiDriveDirect(-50, -50);
+            state = BACK_UP_RIGHT;
+          }
         }
         break;
       }
@@ -260,7 +486,7 @@ robot_state_t controller(robot_state_t state) {
           state = OFF;
         } else {
           float angle_turned = fabs(lsm9ds1_read_gyro_integration().z_axis);
-          if (angle_turned >= 45) {
+          if (angle_turned >= 30) {
             lsm9ds1_stop_gyro_integration();
             // allow encoder momentum to stop
             display_write("PAUSING", DISPLAY_LINE_0);
@@ -271,11 +497,17 @@ robot_state_t controller(robot_state_t state) {
             }
             distance_traveled = 0;
             last_encoder = sensors.leftWheelEncoder;
-            state = DRIVING;
+            if (up0_down1 == 0) {
+              state = DRIVING_UP;
+            }
+            else {
+              state = DRIVING_DOWN;
+            }
           } else {
             display_write("EVADING LEFT", DISPLAY_LINE_0);
             display_float(angle_turned);
             kobukiDriveDirect(-40, 40);
+            state = TURN_AWAY_LEFT;
           }
         }
         break;
@@ -286,7 +518,7 @@ robot_state_t controller(robot_state_t state) {
           state = OFF;
         } else {
           float angle_turned = fabs(lsm9ds1_read_gyro_integration().z_axis);
-          if (angle_turned >= 45) {
+          if (angle_turned >= 30) {
             lsm9ds1_stop_gyro_integration();
             // allow encoder momentum to stop
             display_write("PAUSING", DISPLAY_LINE_0);
@@ -297,17 +529,26 @@ robot_state_t controller(robot_state_t state) {
             }
             distance_traveled = 0;
             last_encoder = sensors.leftWheelEncoder;
-            state = DRIVING;
+            if (up0_down1 == 0) {
+              state = DRIVING_UP;
+            }
+            else {
+              state = DRIVING_DOWN;
+            }
           } else {
             display_write("EVADING RIGHT", DISPLAY_LINE_0);
             display_float(angle_turned);
             kobukiDriveDirect(40, -40);
+            state = TURN_AWAY_RIGHT;
           }
         }
         break;
       }
-
     }
+    //if (is_cliff) {
+    //  state = OFF;
+    //  display_write("Sensed Cliff", DISPLAY_LINE_0);
+    //}
     return state;
 }
 
@@ -319,17 +560,17 @@ void display_float(float v) {
 
 //int i; 
 
-// void pre_dir_change() {
-//   // allow encoder momentum to stop
-//   display_write("PAUSING", DISPLAY_LINE_0);
-//   kobukiDriveDirect(0, 0);
-//   for (i = 0; i < 30; i++) {
-//     kobukiSensorPoll(&sensors);
-//     nrf_delay_ms(1);
-//   }
-//   distance_traveled = 0;
-//   last_encoder = sensors.leftWheelEncoder;
-// }
+void pre_dir_change() {
+  // allow encoder momentum to stop
+  display_write("PAUSING", DISPLAY_LINE_0);
+  kobukiDriveDirect(0, 0);
+  for (i = 0; i < 30; i++) {
+    kobukiSensorPoll(&sensors);
+    nrf_delay_ms(1);
+  }
+  distance_traveled = 0;
+  last_encoder = sensors.leftWheelEncoder;
+}
 
 
 // void back_up_state(bool left) {
@@ -347,10 +588,10 @@ void display_float(float v) {
 //       lsm9ds1_start_gyro_integration();
 //       state = left ? TURN_AWAY_LEFT : TURN_AWAY_RIGHT;
 //       if (state == TURN_AWAY_LEFT) {
-// 	display_write("TURN_AWAY_LEFT", DISPLAY_LINE_0);
+//  display_write("TURN_AWAY_LEFT", DISPLAY_LINE_0);
 //       }
 //       else if (state == TURN_AWAY_RIGHT) {
-// 	display_write("TURN_AWAY_RIGHT", DISPLAY_LINE_0);
+//  display_write("TURN_AWAY_RIGHT", DISPLAY_LINE_0);
 //       }
 //     } else {
 //       kobukiDriveDirect(-50, -50);
